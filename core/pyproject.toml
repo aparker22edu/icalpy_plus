@@ -1,0 +1,15 @@
+[project]
+name = "icalpy_plus"
+version = "0.1.0"
+description = "A Python tool to fetch, store, and serve customizable iCal feeds."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "icalendar",
+    "fastapi[standard-no-fastapi-cloud-cli]",
+    "fastapi-uuidbase62",
+    "sqlmodel"
+]
+
+[project.scripts]
+icalpy-plus = "server.main:main"

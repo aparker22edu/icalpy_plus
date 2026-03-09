@@ -3,8 +3,12 @@ __pycache__/
 *.py[cod]
 .venv/
 
+# Build
+*.egg-info/
+
 # Database
 *.db
+*.sqlite3*
 
 # Environment/Secrets 
 .env
