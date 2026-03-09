@@ -6,21 +6,23 @@
 #
 
 from server.ics_service import get_session, SyncService
-from typing import List
+from typing import List, Annotated
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 import server.schemas as m
 
+SessionDep = Annotated[Session, Depends(get_session)]
+
 router = APIRouter(prefix="/api")
 
 # **** FEED ****
 @router.get("/feeds", response_model=List[m.FeedResponse])
-def get_feeds(session: Session = Depends(get_session)):
+def get_feeds(session: SessionDep):
     return session.exec(select(m.Feed)).all()
 
 @router.post("/feeds", response_model=m.FeedResponse)
-def add_feed(feed_data: m.FeedBase, session: Session = Depends(get_session)):
+def add_feed(feed_data: m.FeedBase, session: SessionDep):
     db_feed = m.Feed.model_validate(feed_data)
     session.add(db_feed)
     session.commit()
@@ -28,7 +30,7 @@ def add_feed(feed_data: m.FeedBase, session: Session = Depends(get_session)):
     return db_feed
 
 @router.delete("/feeds/{feed_id}")
-def remove_feed(feed_id: int, session: Session = Depends(get_session)):
+def remove_feed(feed_id: int, session: SessionDep):
     feed = session.get(m.Feed, feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
@@ -37,7 +39,7 @@ def remove_feed(feed_id: int, session: Session = Depends(get_session)):
     return {"ok": True}
 
 @router.put("/feeds/{feed_id}", response_model=m.FeedResponse)
-def update_feed(feed_id: int, feed_data: m.FeedBase, session: Session = Depends(get_session)):
+def update_feed(feed_id: int, feed_data: m.FeedBase, session: SessionDep):
     db_feed = session.get(m.Feed, feed_id)
     if not db_feed:
         raise HTTPException(status_code=404, detail="Feed not found")
@@ -48,7 +50,7 @@ def update_feed(feed_id: int, feed_data: m.FeedBase, session: Session = Depends(
     return db_feed
 
 @router.post("/feeds/{feed_id}/sync")
-async def sync_feed(feed_id: int, session: Session = Depends(get_session)):
+async def sync_feed(feed_id: int, session: SessionDep):
     feed = session.get(m.Feed, feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
@@ -67,16 +69,17 @@ async def sync_feed(feed_id: int, session: Session = Depends(get_session)):
 # TODO: Implementation for filtering and sorting
 #     Handle query parametersfor example:
 #     GET /api/tasks?status=in_progress&since=2023-01-01
+# https://oneuptime.com/blog/post/2026-02-03-fastapi-query-parameters/view
 # TODO: handle locally added events/tasks
 
 @router.get("/tasks", response_model=List[m.TaskResponse])
-def get_tasks(session: Session = Depends(get_session)):
+def get_tasks(session: SessionDep):
     # Use selectinload to ensure tags are included in the response
     statement = select(m.Task).options(selectinload(m.Task.tags))
     return session.exec(statement).all()
 
 @router.post("/tasks", response_model=m.TaskResponse)
-def add_task(task_data: m.TaskSyncBase, session: Session = Depends(get_session)):
+def add_task(task_data: m.TaskSyncBase, session: SessionDep):
     # Generate a unique UID if not provided for local tasks
     db_task = m.Task.model_validate(task_data)
     session.add(db_task)
@@ -85,10 +88,13 @@ def add_task(task_data: m.TaskSyncBase, session: Session = Depends(get_session))
     return db_task
 
 @router.put("/tasks/{task_id}", response_model=m.TaskResponse)
-def update_task(task_id: int, task_data: m.TaskUpdate, session: Session = Depends(get_session)):
+def update_task(task_id: int, task_data: m.TaskUpdate, session: SessionDep):
     db_task = session.get(m.Task, task_id)
     if not db_task:
         raise HTTPException(status_code=404, detail="Task not found")
+    # TODO: tag linking needs to be done on UID instead of task_id
+    #       update schema as well
+
     # Handle Many-to-Many Tags Linker Table
     if task_data.tag_ids is not None:
         if task_data.tag_ids:
@@ -105,7 +111,7 @@ def update_task(task_id: int, task_data: m.TaskUpdate, session: Session = Depend
     return db_task
 
 @router.delete("/tasks/{task_id}")
-def remove_task(task_id: int, session: Session = Depends(get_session)):
+def remove_task(task_id: int, session: SessionDep):
     task = session.get(m.Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -115,11 +121,11 @@ def remove_task(task_id: int, session: Session = Depends(get_session)):
 
 # **** TAGS ****
 @router.get("/tags", response_model=List[m.TagResponse])
-def get_tags(session: Session = Depends(get_session)):
+def get_tags(session: SessionDep):
     return session.exec(select(m.Tag)).all()
 
 @router.post("/tags", response_model=m.TagResponse)
-def add_tag(tag_data: m.TagBase, session: Session = Depends(get_session)):
+def add_tag(tag_data: m.TagBase, session: SessionDep):
     db_tag = m.Tag.model_validate(tag_data)
     session.add(db_tag)
     session.commit()
@@ -127,7 +133,7 @@ def add_tag(tag_data: m.TagBase, session: Session = Depends(get_session)):
     return db_tag
 
 @router.delete("/tags/{tag_id}")
-def remove_tag(tag_id: int, session: Session = Depends(get_session)):
+def remove_tag(tag_id: int, session: SessionDep):
     tag = session.get(m.Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
