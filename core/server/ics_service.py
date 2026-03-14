@@ -5,39 +5,57 @@
 # This code will fetch and parse the ical data
 #
 
+#TODO: consider renaming this file to service.py or services.py
+
 #imports
-import logging
-import httpx, random
-from uuidbase62 import base62 # will use for fake UID on local tasks
+import logging, httpx
 from icalendar import Calendar
+from datetime import datetime
+from contextlib import contextmanager
 import server.schemas as m
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import SQLModel, Session, create_engine, select, text
 from sqlalchemy import event
 from typing import List, Dict, Set
 
+
+#constants
 DB_NAME = "icalpy_plus.sqlite3"
 DATABASE_URL = f"sqlite:///{DB_NAME}"
 
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, )
+
 
 def get_session():
     with Session(engine) as session:
+        session.exec(text("PRAGMA foreign_keys=ON"))
+        status = session.exec(text("PRAGMA foreign_keys")).first()
+        logging.debug(f"PRAGMA status: {status}") # Should be 1
         yield session
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# implementing contextmanager fix from 
+# https://stackoverflow.com/questions/75118223/working-with-generator-context-manager-in-fastapi-db-session
+#  for the background session
+session_context = contextmanager(get_session)
 
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    """
-    Enables foreign key constraints in SQLite. 
-    This is required for 'ON DELETE CASCADE' to function correctly.
-    """
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+class DataService:
+    @staticmethod
+    def init_db():
+        """Creates the database and all defined tables."""
+        try:
+            SQLModel.metadata.create_all(engine)
+            with engine.connect() as connection:
+                connection.execute(text("PRAGMA foreign_keys=ON"))  # for SQLite only
 
+            logging.info("Database tables initialized.")
+        except Exception as e:
+            logging.error(f"Failed to initialize database: {e}")
+
+    def cleanup():
+        engine.dispose()
+        logging.info("Disconnected from database.")
+    
 
 class SyncService:
     
@@ -48,7 +66,7 @@ class SyncService:
         of dictionaries.
         """
         try:
-            with httpx.Client() as client:
+            with httpx.Client(timeout=15.0) as client:
                 response = client.get(url)
                 response.raise_for_status()
                 calendar = Calendar.from_ical(response.content)
@@ -56,6 +74,9 @@ class SyncService:
             entries = []
             for component in calendar.walk():
                 if component.name == "VEVENT":
+                    logging.debug(f"DEBUG: Raw DT: {component.get('dtstart').dt} | Type: {type(component.get('dtstart').dt)}")
+                    # TODO: handle all day events
+
                     entries.append({
                         "uid": str(component.get('uid')),
                         "summary": str(component.get('summary')),
@@ -71,7 +92,7 @@ class SyncService:
     @staticmethod
     def sync_ics_to_db(session: Session, incoming_entries: List[dict], feed_id: int):
         """
-        Optimized Bulk Sync with Stale Cleanup:
+        Bulk Sync:
         1. Fetches all existing tasks for the specific feed.
         2. Updates or inserts incoming tasks.
         3. Deletes tasks that exist in DB for this feed but are missing from incoming data.
@@ -81,7 +102,8 @@ class SyncService:
 
         # Fetch all from feed
         statement = select(m.Task).where(m.Task.source_id == feed_id)
-        existing_tasks: Dict[str, m.Task] = {t.uid: t for t in session.exec(statement).all()}
+        result = session.exec(statement)
+        existing_tasks = {t.uid: t for t in result.all()}
 
         # all uids from feed 
         incoming_uids: Set[str] = {e["uid"] for e in incoming_entries}
@@ -108,25 +130,31 @@ class SyncService:
         session.commit()
 
     @staticmethod
-    async def perform_sync(session: Session, feed: m.Feed):
+    def perform_sync(feed_id: int):
         """
-        Standalone async function to handle the sync process for a feed.
-        Can be called from route handlers or background tasks.
+        Handles the sync process for a single feed.
+        Should be called from a background task.
         """
-        statement = select(m.selectFeed)
-        feeds = session.exec(statement).all()
-        
-        if not feeds:
-            print("Initialization: No feeds found in database.")
-            return
-
-        print(f"Initializing sync for {len(feeds)} registered feeds...")
-        for feed in feeds:
+        # generate our own session
+        with session_context() as session:
+            feed = session.get(m.Feed, feed_id)
+            if not feed:
+                logging.error(f"No such feed id: {feed_id}")
+                return
             try:
-                # Fetch entries using the SyncService
                 ics_entries = SyncService.fetch_as_dicts(feed.url, feed.id)
-                # Process the sync and update the database
                 SyncService.sync_ics_to_db(session, ics_entries, feed.id)
-                logging.DEBUG(f"  ✓ {feed.label}: Synced {ics_entries.count} tasks.")
+
+                feed.synced_at = datetime.now() 
+                session.add(feed)
+                session.commit()
+            
+                logging.info(f"SUCCESS: sync complete, count: {len(ics_entries)}")
+
             except Exception as e:
-                raise Exception(f"Sync process failed for feed {feed.id}: {str(e)}")
+                session.rollback()
+                logging.error(f"FAILURE: Sync failed for {feed.label}: {e}")
+            
+
+        
+        

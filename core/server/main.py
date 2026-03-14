@@ -7,13 +7,12 @@
 
 # main.py
 import logging
-from server.ics_service import create_db_and_tables
+from server.ics_service import DataService
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from server.api import router as api_router
-
-
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -24,34 +23,41 @@ def main():
     logging.debug('')
     pass
 
-# Initialize the database tables on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.debug(f'{__name__}')
 
     # --- Startup Logic ---
-    create_db_and_tables()
-    print("Database initialized.")
+    DataService.init_db()
+    logging.info("Database initialized.")
     
     yield  # The app runs while it's "held" here
     
-    # --- Shutdown Logic (if needed) ---
-    print("Cleaning up...")
+    # --- Shutdown Logic ---
+    logging.info("Cleaning up...")
+    DataService.cleanup()
+
 
 app = FastAPI(title="iCalPy+ API", lifespan=lifespan)
 app.include_router(api_router)    
 
-# Allows your local test.html to talk to this API
+# Allows local test.html to talk to this API 
+origins = [
+    "localhost", # The allowed frontend URL
+    "127.0.0.1"
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For dev; narrow this down for production
+    allow_origins=["*"],  #still in dev mode
     allow_methods=["*"],
     allow_headers=["*"],
 )
-    
+# app.add_middleware(
+#     TrustedHostMiddleware, allowed_hosts=origins
+# )
 
 # INIT
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server.main:app", host="127.0.0.1", port=8000, reload=True)
+# TODO: add env settings to set debug load vs production
