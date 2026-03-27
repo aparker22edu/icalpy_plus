@@ -53,6 +53,9 @@ class FeedResponse(FeedBase):
 # endregion
 
 # region Categories
+#TODO: consider categories as self-referential to have groups
+# eg. Parents: Tags, Priority, Status 
+# each with their own set of children
 class CategoryBase(SQLModel):
     label: str = Field(index=True, unique=True)
     color: str = "#007bff"
@@ -70,6 +73,8 @@ class CategoryResponse(CategoryBase):
 # endregion 
 
 # region tasks/events
+#TODO: consider renaming tasks back to events
+#TODO: consider adding some fields like is_all_day, is_task (has due date), end_time
 class TaskSyncBase(SQLModel):
     """Fields synchronized from the .ics """
     uid: str = Field(index=True, unique=True)

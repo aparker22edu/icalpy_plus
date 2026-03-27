@@ -10,7 +10,7 @@
 #imports
 import logging, httpx
 from icalendar import Calendar
-from datetime import datetime
+import datetime
 from contextlib import contextmanager
 import server.schemas as m
 from sqlmodel import SQLModel, Session, create_engine, select, text
@@ -74,19 +74,26 @@ class SyncService:
             entries = []
             for component in calendar.walk():
                 if component.name == "VEVENT":
-                    logging.debug(f"DEBUG: Raw DT: {component.get('dtstart').dt} | Type: {type(component.get('dtstart').dt)}")
-                    # TODO: handle all day events
+                    # logging.debug(f"DEBUG: Raw DT: {component.get('dtstart').dt} | Type: {type(component.get('dtstart').dt)}")
+                    # TODO: user flag for all_day events
+                    task_date = component.get('dtstart').dt
+                    if task_date is datetime.date:
+                        str_date = task_date.strftime('%Y-%m-%dT12:00:00') # noon hack for all day events
+                    else:
+                        str_date = task_date.isoformat()
+
+                    logging.debug(f"DEBUG: converted DT: {str_date} | Type: {type(component.get('dtstart').dt)}")
 
                     entries.append({
                         "uid": str(component.get('uid')),
                         "summary": str(component.get('summary')),
                         "description": str(component.get('description', '')),
-                        "start_time": component.get('dtstart').dt.isoformat(),
+                        "start_time": str_date,
                         "source_id": feed_id
                     })
             return entries
         except Exception as e:
-            logging.error(f"SyncService Error: {e}")
+            logging.error(f"FAILURE: SyncService Error: {e}")
             raise e
         
     @staticmethod
@@ -100,7 +107,7 @@ class SyncService:
         if not incoming_entries and not feed_id:
             return
 
-        # Fetch all from feed
+        # Fetch all from db
         statement = select(m.Task).where(m.Task.source_id == feed_id)
         result = session.exec(statement)
         existing_tasks = {t.uid: t for t in result.all()}
@@ -145,15 +152,15 @@ class SyncService:
                 ics_entries = SyncService.fetch_as_dicts(feed.url, feed.id)
                 SyncService.sync_ics_to_db(session, ics_entries, feed.id)
 
-                feed.synced_at = datetime.now() 
+                feed.synced_at = datetime.datetime.now() 
                 session.add(feed)
                 session.commit()
             
-                logging.info(f"SUCCESS: sync complete, count: {len(ics_entries)}")
+                logging.info(f"SUCCESS: SyncService complete, count: {len(ics_entries)}")
 
             except Exception as e:
                 session.rollback()
-                logging.error(f"FAILURE: Sync failed for {feed.label}: {e}")
+                logging.error(f"FAILURE: SyncService rolled back changes for {feed.label}: {e}. ")
             
 
         

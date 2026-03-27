@@ -6,10 +6,12 @@
 #
 
 # main.py
-import logging
+import logging, os
+from pathlib import Path
 from server.ics_service import DataService
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from server.api import router as api_router
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -18,6 +20,12 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# TODO: Allow for default/custom view folder location instead of relative path
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+VIEWS_PATH = BASE_DIR / "view"
+
+
 
 def main():
     logging.debug('')
@@ -41,20 +49,30 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="iCalPy+ API", lifespan=lifespan)
 app.include_router(api_router)    
 
-# Allows local test.html to talk to this API 
+
+
+# Mount each folder in 'view' automatically
+for view_name in os.listdir(VIEWS_PATH):
+    view_dir = os.path.join(VIEWS_PATH, view_name)
+    if os.path.isdir(view_dir):
+        app.mount(
+            f"/view/{view_name}", 
+            StaticFiles(directory=view_dir, html=True), 
+            name=view_name
+        )
 origins = [
     "localhost", # The allowed frontend URL
     "127.0.0.1"
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  #still in dev mode
+    allow_origins=[origins],  #still in dev mode
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# app.add_middleware(
-#     TrustedHostMiddleware, allowed_hosts=origins
-# )
+app.add_middleware(
+    TrustedHostMiddleware, allowed_hosts=origins
+)
 
 # INIT
 if __name__ == "__main__":

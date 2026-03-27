@@ -7,7 +7,7 @@
 
 #TODO: consider moving to separate endpoint files under routers folder
 
-import uuid
+import uuid, logging
 from datetime import datetime, timedelta
 from uuidbase62 import base62 # will use for fake UID on local tasks
 from server.ics_service import get_session, SyncService
@@ -76,7 +76,7 @@ def sync_feed(feed_id: int, background_tasks: BackgroundTasks):
 
 @router.get("/tasks", response_model=List[m.TaskResponse])
 def get_tasks(session: SessionDep, 
-        days_back: int = Query(
+    days_back: int = Query(
         default=5, 
         title="Days in the Past",
         description="Positive integer number of days ago to include",
@@ -94,7 +94,7 @@ def get_tasks(session: SessionDep,
     start_date = now - timedelta(days=days_back)
     end_date = now + timedelta(days=days_ahead)
     
-    # SQLModel filter: find tasks within a 14 day window
+    # SQLModel filter: find tasks within a date window
     statement = (
         select(m.Task)
         .where(
@@ -105,8 +105,11 @@ def get_tasks(session: SessionDep,
         .order_by(m.Task.start_time.desc())
         )
     # Use selectinload to ensure categories are included in the response
+    
+    response_tasks = session.exec(statement).all()
+    logging.debug(f"DEBUG: updating feed {response_tasks}")
 
-    return session.exec(statement).all()
+    return response_tasks
 
 # TODO: this may need to be put in dev mode since we don't have 
 # whole task updating and might disable deletes
