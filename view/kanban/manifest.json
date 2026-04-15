@@ -1,0 +1,7 @@
+{
+  "view_id": "kanban",
+  "name": "icalpy+ Kanban",
+  "entry": "index.html",
+  "api_requirements": ["tasks", "feeds", "categories"],
+  "description": "Full CRUD Kanban board with drag-and-drop and feed management."
+}
