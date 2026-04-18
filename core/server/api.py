@@ -10,17 +10,22 @@
 import uuid, logging
 from datetime import datetime, timedelta
 from uuidbase62 import base62 # will use for fake UID on local tasks
-from server.ics_service import get_session, SyncService
-from typing import List, Annotated
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
+from typing import List, Annotated, Protocol
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, Request
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 import server.schemas as m 
+from server.service import data_service, sync_service
 
-SessionDep = Annotated[Session, Depends(get_session)]
 
+def get_db(request: Request):
+    # data_service should be set in app init
+    yield from data_service.get_session()
+
+SessionDep = Annotated[Session, Depends(get_db)]
 
 router = APIRouter(prefix="/api")
+
 
 # region **** FEED ****
 @router.get("/feeds", response_model=List[m.FeedResponse])
@@ -34,7 +39,7 @@ def add_feed(feed_data: m.FeedBase, session: SessionDep, background_tasks: Backg
     session.commit()
     session.refresh(db_feed)
     # adding this line to auto-sync after we get an id
-    background_tasks.add_task(SyncService.perform_sync, db_feed.id)
+    background_tasks.add_task(sync_service.sync_feed, db_feed.id)
     return db_feed
 
 @router.delete("/feeds/{feed_id}")
@@ -57,12 +62,12 @@ def update_feed(feed_id: int, feed_data: m.FeedBase, session: SessionDep, backgr
     session.refresh(db_feed)
     # adding this line to auto-sync after we update
     # could maybe limit it to only update if the url is updated
-    background_tasks.add_task(SyncService.perform_sync, db_feed.id)
+    background_tasks.add_task(sync_service.sync_feed, db_feed.id)
     return db_feed
 
 @router.post("/feeds/{feed_id}/sync")
 def sync_feed(feed_id: int, background_tasks: BackgroundTasks):
-    background_tasks.add_task(SyncService.perform_sync, feed_id)
+    background_tasks.add_task(sync_service.sync_feed, feed_id)
     return {"ok": True}
 # endregion
 
@@ -125,6 +130,7 @@ def add_task(task_data: m.TaskSyncBase, session: SessionDep):
     session.refresh(db_task)
     return db_task
 
+#TODO: consider using patch
 @router.put("/tasks/{task_id}", response_model=m.TaskResponse)
 def update_task(task_id: int, task_data: m.TaskUpdate, session: SessionDep):
     db_task = session.get(m.Task, task_id)

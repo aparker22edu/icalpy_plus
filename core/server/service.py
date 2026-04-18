@@ -22,45 +22,70 @@ from typing import List, Dict, Set
 DB_NAME = "icalpy_plus.sqlite3"
 DATABASE_URL = f"sqlite:///{DB_NAME}"
 
+# engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, )
 
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, )
+# def get_session():
+#     with Session(engine) as session:
+#         session.exec(text("PRAGMA foreign_keys=ON"))
+#         status = session.exec(text("PRAGMA foreign_keys")).first()
+#         logging.debug(f"PRAGMA status: {status}") # Should be 1
+#         yield session
 
-
-def get_session():
-    with Session(engine) as session:
-        session.exec(text("PRAGMA foreign_keys=ON"))
-        status = session.exec(text("PRAGMA foreign_keys")).first()
-        logging.debug(f"PRAGMA status: {status}") # Should be 1
-        yield session
-
-# implementing contextmanager fix from 
-# https://stackoverflow.com/questions/75118223/working-with-generator-context-manager-in-fastapi-db-session
-#  for the background session
-session_context = contextmanager(get_session)
+# # implementing contextmanager fix from 
+# # https://stackoverflow.com/questions/75118223/working-with-generator-context-manager-in-fastapi-db-session
+# #  for the background session
+# session_context = contextmanager(get_session)
 
 class DataService:
-    @staticmethod
-    def init_db():
+    def __init__(self):
+        self.url = DATABASE_URL
+        self.engine = create_engine(
+            self.url, 
+            connect_args={"check_same_thread": False}
+        )
+        self.init_db()
+
+    def init_db(self):
         """Creates the database and all defined tables."""
         try:
-            SQLModel.metadata.create_all(engine)
-            with engine.connect() as connection:
-                connection.execute(text("PRAGMA foreign_keys=ON"))  # for SQLite only
-
+            SQLModel.metadata.create_all(self.engine)
             logging.info("Database tables initialized.")
         except Exception as e:
             logging.error(f"Failed to initialize database: {e}")
 
-    def cleanup():
-        engine.dispose()
+    def cleanup(self):
+        self.engine.dispose()
         logging.info("Disconnected from database.")
     
+    def get_session(self):
+        """Session for FastAPI"""
+        with Session(self.engine) as session:
+            session.exec(text("PRAGMA foreign_keys=ON"))
+            yield session
+
+    @contextmanager
+    def session_context(self):
+        """Standard context manager for processing ics file"""
+        with Session(self.engine) as session:
+            session.exec(text("PRAGMA foreign_keys=ON"))
+            # status = session.exec(text("PRAGMA foreign_keys")).first()
+            # logging.debug(f"PRAGMA status: {status}") # Should be 1
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
 
 class SyncService:
+    def __init__(self, data_service: DataService):
+        self.data_service = data_service
     
-    @staticmethod
-    def fetch_as_dicts(url: str, feed_id: int) -> List[dict]:
+    def _fetch(self, url: str, feed_id: int) -> List[dict]:
         """
         Fetches data from a single iCal URL and returns a list 
         of dictionaries.
@@ -68,7 +93,7 @@ class SyncService:
         try:
             with httpx.Client(timeout=15.0) as client:
                 response = client.get(url)
-                response.raise_for_status()
+                response.raise_for_status() # check for error
                 calendar = Calendar.from_ical(response.content)
             
             entries = []
@@ -96,12 +121,12 @@ class SyncService:
             logging.error(f"FAILURE: SyncService Error: {e}")
             raise e
         
-    @staticmethod
-    def sync_ics_to_db(session: Session, incoming_entries: List[dict], feed_id: int):
+    
+    def _process_feed(self, session: Session, incoming_entries: List[dict], feed_id: int):
         """
-        Bulk Sync:
+        Bulk Process:
         1. Fetches all existing tasks for the specific feed.
-        2. Updates or inserts incoming tasks.
+        2. Decides Updates or inserts incoming tasks.
         3. Deletes tasks that exist in DB for this feed but are missing from incoming data.
         """
         if not incoming_entries and not feed_id:
@@ -133,35 +158,33 @@ class SyncService:
             if uid not in incoming_uids:
                 session.delete(task_to_check)
         
-        # commit everything
-        session.commit()
-
-    @staticmethod
-    def perform_sync(feed_id: int):
+    def sync_feed(self, feed_id: int):
         """
         Handles the sync process for a single feed.
         Should be called from a background task.
         """
         # generate our own session
-        with session_context() as session:
+        with self.data_service.session_context() as session:
             feed = session.get(m.Feed, feed_id)
             if not feed:
                 logging.error(f"No such feed id: {feed_id}")
                 return
             try:
-                ics_entries = SyncService.fetch_as_dicts(feed.url, feed.id)
-                SyncService.sync_ics_to_db(session, ics_entries, feed.id)
+                ics_entries = self._fetch(feed.url, feed.id)
+                self._process_feed(session, ics_entries, feed.id)
 
                 feed.synced_at = datetime.datetime.now() 
                 session.add(feed)
-                session.commit()
-            
+                # commit is handled by the session_context
                 logging.info(f"SUCCESS: SyncService complete, count: {len(ics_entries)}")
 
             except Exception as e:
-                session.rollback()
+                #rollback is handled by the session_context
                 logging.error(f"FAILURE: SyncService rolled back changes for {feed.label}: {e}. ")
             
 
-        
+# Create instance of each class 
+#TODO: consider reworking this away from a singleton here
+data_service = DataService()
+sync_service = SyncService(data_service)       
         
