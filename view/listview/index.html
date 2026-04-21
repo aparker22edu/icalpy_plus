@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Task Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>☀️ Task Dashboard</h1>
+
+    <!-- Feed Section -->
+    <section class="card">
+      <h2>Feeds</h2>
+      <input id="feed-url" placeholder="Feed URL" />
+      <input id="feed-label" placeholder="Label" />
+      <button onclick="addFeed()">Add Feed</button>
+
+      <div id="feeds"></div>
+    </section>
+
+    <!-- Controls -->
+    <section class="card">
+      <h2>Tasks</h2>
+      <div class="controls">
+        <select id="sort">
+          <option value="date">Sort by Date</option>
+          <option value="status">Sort by Status</option>
+          <option value="category">Sort by Category</option>
+        </select>
+        <button onclick="loadTasks()">Refresh</button>
+      </div>
+
+      <div id="tasks"></div>
+    </section>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

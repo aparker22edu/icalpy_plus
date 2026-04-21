@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iCalPy+ | The Pulse v2</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&display=swap');
+        body { font-family: 'Space Grotesk', sans-serif; background: #0b0f1a; color: white; }
+        .pulse-node { transition: all 0.3s ease; cursor: pointer; }
+        .pulse-node:hover { r: 8; stroke-width: 3; stroke: white; }
+        .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .day-column { border-right: 1px solid rgba(255,255,255,0.05); }
+				/* Custom "Breathing" Pulse - much smoother than the default ping */
+		@keyframes breathing {
+			0%, 100% { transform: scale(1); opacity: 0.15; filter: blur(4px); }
+			50% { transform: scale(1.4); opacity: 0.4; filter: blur(8px); }
+		}
+		.pulse-glow {
+			animation: breathing 4s ease-in-out infinite;
+		}
+		.sync-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+    <div id="app" class="min-h-screen p-4 md:p-8">
+		<header class="flex justify-between items-center mb-8">
+			<div class="flex items-center gap-3">
+				<div class="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20">
+					<i class="fas fa-wave-square text-xl text-white"></i>
+				</div>
+				<h1 class="text-xl font-bold tracking-tight text-white">iCalPy+ <span class="text-indigo-400 font-light italic">StressPulse</span></h1>
+			</div>
+
+			<div class="flex items-center gap-6">
+				<div class="text-right hidden sm:block">
+					<p class="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Weekly Intensity</p>
+					<div class="flex items-center justify-end gap-2">
+						<span class="text-lg font-black transition-colors duration-500">
+						{{ totalStress }}%
+						</span>
+						<div class="w-10 h-10 rounded-full pointer-events-none"
+							 :class="{
+							'bg-emerald-400': totalStress < 30,
+							'bg-amber-400': totalStress >= 30 && totalStress < 70,
+							'bg-rose-500': totalStress >= 70
+						  }">
+						  </div>
+					</div>
+				</div>
+			</div>
+
+				<button @click="handleSync" 
+						class="sync-btn relative group flex items-center gap-3 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 hover:border-slate-500 px-4 py-2 rounded-2xl transition-all duration-300">
+									
+					<div class="flex flex-col items-start leading-none">
+						<span class="text-[10px] font-black text-slate-500 uppercase tracking-tighter">Sync Feeds</span>
+						<span v-if="isSyncing" class="text-[9px] text-indigo-400 animate-pulse font-bold uppercase mt-1">Updating...</span>
+						<span v-else class="text-[9px] text-slate-400 font-bold uppercase mt-1">All Clear</span>
+					</div>
+
+					<i class="fas fa-sync-alt text-[10px] transition-all ml-2"
+					   :class="[isSyncing ? 'fa-spin text-white' : 'text-slate-600 group-hover:text-white group-hover:rotate-180']"></i>
+				</button>
+		</header>
+
+        <div class="glass-card rounded-3xl p-6 mb-8 relative overflow-hidden">
+            <div class="absolute inset-0 flex">
+                <div v-for="day in 7" :key="day" class="flex-1 day-column"></div>
+            </div>
+            
+            <svg viewBox="0 0 1000 250" class="w-full h-48 relative z-10 overflow-visible">
+                <g v-for="(day, i) in timelineDays" :key="i">
+                    <text :x="(i * 142) + 71" y="240" text-anchor="middle" class="fill-slate-500 text-[10px] font-bold uppercase">
+                        {{ day.label }}
+                    </text>
+                </g>
+
+                <path :d="pulsePath" fill="none" stroke="url(#stressGradient)" stroke-width="3" stroke-dasharray="0" class="transition-all duration-700" />
+                
+                <circle v-for="node in taskNodes" 
+                        :key="node.id" 
+                        :cx="node.x" :cy="node.y" r="5" 
+                        class="pulse-node"
+                        :class="node.status === 'complete' ? 'fill-slate-700' : 'fill-indigo-400'"
+                        @click="selectDate(node.dateStr)" />
+
+                <defs>
+                    <linearGradient id="stressGradient" x1="0%" y1="0%" x2="100%" x2="0%">
+                        <stop offset="0%" stop-color="#6366f1" />
+                        <stop offset="100%" stop-color="#f43f5e" />
+                    </linearGradient>
+                </defs>
+            </svg>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2 space-y-4">
+                <div v-if="selectedDate" class="flex justify-between items-end mb-2">
+                    <h2 class="text-2xl font-bold">Tasks for {{ selectedDate }}</h2>
+                    <span class="text-slate-500 text-sm">{{ siblingTasks.length }} items found</span>
+                </div>
+
+                <transition-group name="list">
+                    <div v-for="task in siblingTasks" :key="task.id" 
+                         class="glass-card rounded-2xl p-5 flex items-center justify-between hover:border-indigo-500/50 transition-all">
+                        <div class="flex-1">
+                            <div class="flex gap-2 mb-1">
+                                <span v-for="cat in task.categories" :key="cat.id" 
+                                      :style="{ color: cat.color }" class="text-[9px] font-black uppercase tracking-tighter">
+                                    ● {{ cat.label }}
+                                </span>
+                            </div>
+                            <h3 class="font-bold text-lg" :class="{'line-through text-slate-600': task.status === 'complete'}">
+                                {{ task.summary }}
+                            </h3>
+                            <p class="text-xs text-slate-500">{{ formatTime(task.start_time) }}</p>
+                        </div>
+
+                        <button @click="cycleStatus(task)" 
+                                :class="statusConfig[task.status].btnClass"
+                                class="px-4 py-2 rounded-xl text-xs font-black transition-all">
+                            {{ statusConfig[task.status].label }}
+                        </button>
+                    </div>
+                </transition-group>
+            </div>
+
+            <div class="space-y-6">
+                <div class="glass-card rounded-3xl p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-sm font-black text-slate-500 uppercase tracking-widest">Weighting</h3>
+                        <i class="fas fa-info-circle text-slate-700" title="Low value (0-1) = High Stress"></i>
+                    </div>
+                    <div class="space-y-4">
+                        <div v-for="cat in categories" :key="cat.id" class="group">
+                            <div class="flex justify-between items-center mb-1">
+                                <input v-model="cat.label" @change="updateCategory(cat)" 
+                                       class="bg-transparent text-sm font-bold focus:outline-none border-b border-transparent focus:border-indigo-500">
+                                <div class="flex items-center gap-2">
+                                    <input type="number" v-model="cat.value" @change="updateCategory(cat)"
+                                           class="w-10 bg-slate-800 rounded px-1 text-xs text-center py-1 font-mono">
+                                    <button @click="deleteCategory(cat.id)" class="text-slate-700 group-hover:text-rose-500 transition-colors">
+                                        <i class="fas fa-trash-alt text-[10px]"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div class="h-full transition-all duration-500" 
+                                     :style="{ width: (Math.max(0, 10 - cat.value) * 10) + '%', backgroundColor: cat.color }"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <button @click="addCategory" class="w-full mt-6 py-3 border-2 border-dashed border-slate-800 rounded-2xl text-[10px] font-black text-slate-500 hover:border-indigo-500 hover:text-indigo-500 transition-all">
+                        + NEW CATEGORY
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const tasks = ref([]);
+                const categories = ref([]);
+                const selectedDate = ref(null);
+				
+				const isSyncing = ref(false);
+
+                const statusConfig = {
+					// This prevents the "Cannot read properties of undefined" crash
+					'none': { label: 'NEW', btnClass: 'bg-slate-700/50 text-slate-400' }, 
+					'to_do': { label: 'TO DO', btnClass: 'bg-indigo-500/10 text-indigo-400' },
+					'in_progress': { label: 'DOING', btnClass: 'bg-amber-500/10 text-amber-400 animate-pulse' },
+					'complete': { label: 'DONE', btnClass: 'bg-emerald-500/10 text-emerald-400' }
+				};
+
+                const fetchData = async () => {
+                    const [tRes, cRes] = await Promise.all([
+                        fetch('/api/tasks?days_ahead=7'),
+                        fetch('/api/categories')
+                    ]);
+                    tasks.value = await tRes.json();
+                    categories.value = await cRes.json();
+                    
+                    if (!selectedDate.value) {
+                        selectedDate.value = new Date().toLocaleDateString();
+                    }
+                };
+
+                const timelineDays = computed(() => {
+                    const days = [];
+                    for(let i=0; i<7; i++) {
+                        const d = new Date();
+                        d.setDate(d.getDate() + i);
+                        days.push({
+                            label: d.toLocaleDateString([], { weekday: 'short', day: 'numeric' }),
+                            dateStr: d.toLocaleDateString()
+                        });
+                    }
+                    return days;
+                });
+				
+				const totalStress = computed(() => {
+					if (tasks.value.length === 0) return 0;
+
+					const now = new Date();
+					const todayStr = now.toLocaleDateString();
+
+					// 1. Establish a fixed baseline so "high" is always "high"
+					// We'll use 0 as max stress and 20 as low stress baseline
+					const allValues = categories.value.map(c => c.value);
+					const minVal = Math.min(...allValues, 0);
+					const maxVal = Math.max(...allValues, 20); // Using 20 as a 'calm' default
+					const range = maxVal - minVal || 1;
+
+					let accumulatedStress = 0;
+					let maxPossibleStress = 0;
+
+					tasks.value.forEach(t => {
+						if (t.status === 'complete') return;
+
+						const isToday = new Date(t.start_time).toLocaleDateString() === todayStr;
+						const mainCat = t.categories[0];
+						const weight = mainCat ? mainCat.value : (maxVal / 2);
+
+						// Normalize stress: 1.0 is max, 0.0 is min
+						const taskStressBase = (maxVal - weight) / range;
+						
+						// Multiply by 3 if it's due today to spike the intensity
+						const multiplier = isToday ? 3 : 1;
+						
+						accumulatedStress += (taskStressBase * multiplier);
+						maxPossibleStress += multiplier;
+					});
+
+					if (maxPossibleStress === 0) return 0;
+					return Math.min(100, Math.round((accumulatedStress / maxPossibleStress) * 100));
+				});
+
+                const taskNodes = computed(() => {
+					const now = new Date();
+					
+					// 1. Find the range of current category values to scale relatively
+					const allValues = categories.value.map(c => c.value);
+					const minVal = Math.min(...allValues, 0); // Assume 0 is a floor
+					const maxVal = Math.max(...allValues, 1); // Avoid division by zero
+					const range = maxVal - minVal;
+
+					return tasks.value.map(t => {
+						const tDate = new Date(t.start_time);
+						const progress = (tDate - now) / (7 * 24 * 60 * 60 * 1000);
+						const x = Math.max(0, Math.min(1000, progress * 1000));
+						
+						let y = 200; // Default baseline (No stress)
+						
+						if (t.status !== 'complete') {
+							const mainCat = t.categories[0];
+							const weight = mainCat ? mainCat.value : maxVal;
+							
+							// 2. Normalize: Higher numeric value = Lower Y offset (closer to baseline)
+							// relativeWeight is 0.0 (max stress) to 1.0 (min stress)
+							const relativeWeight = (weight - minVal) / range;
+							
+							// 3. Map to Y-coordinates: 50 (High Peak) to 180 (Near Baseline)
+							const peakHeight = 50 + (relativeWeight * 130);
+							y = peakHeight;
+						}
+						
+						return { 
+							id: t.id, x, y, 
+							status: t.status, dateStr: tDate.toLocaleDateString(), task: t
+						};
+					});
+				});
+                
+
+                const pulsePath = computed(() => {
+                    if (taskNodes.value.length === 0) return "M 0 200 L 1000 200";
+                    let sorted = [...taskNodes.value].sort((a,b) => a.x - b.x);
+                    let d = `M 0 200`;
+                    sorted.forEach((node, i) => {
+                        const prev = i === 0 ? {x:0, y:200} : sorted[i-1];
+                        const cp1x = prev.x + (node.x - prev.x)/2;
+                        d += ` C ${cp1x} ${prev.y}, ${cp1x} ${node.y}, ${node.x} ${node.y}`;
+                    });
+                    d += ` L 1000 200`;
+                    return d;
+                });
+				
+				const handleSync = async () => {
+					if (isSyncing.value) return; // Prevent double-clicks
+					isSyncing.value = true;
+					
+					try {
+						// Assume feeds is already reactive from setup
+						await Promise.all(feeds.value.map(f => 
+							fetch(`/api/feeds/${f.id}/sync`, { method: 'POST' })
+						));
+						await fetchData();
+					} catch (e) {
+						console.error("Sync error:", e);
+					} finally {
+						// Keep the "Updating..." visible long enough to be seen
+						setTimeout(() => isSyncing.value = false, 1200);
+					}
+				};
+				
+                const siblingTasks = computed(() => {
+                    return tasks.value.filter(t => new Date(t.start_time).toLocaleDateString() === selectedDate.value);
+                });
+				
+				const sortedTasks = computed(() => {
+					const today = new Date().toDateString();
+					return [...siblingTasks.value].sort((a, b) => {
+						const getScore = (t) => {
+							const isToday = new Date(t.start_time).toDateString() === today;
+							const weight = t.categories?.[0]?.value ?? 10;
+							// Lower category value = Higher Stress. Multiply by 3 for today.
+							return (20 - weight) * (isToday ? 3 : 1);
+						};
+						return getScore(b) - getScore(a);
+					});
+				});
+
+                const cycleStatus = async (task) => {
+                    const flow = ['to_do', 'in_progress', 'complete', 'to_do'];
+                    const next = flow[flow.indexOf(task.status) + 1];
+                    
+                    await fetch(`/api/tasks/${task.id}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ status: next })
+                    });
+                    task.status = next;
+                };
+
+                const updateCategory = async (cat) => {
+                    await fetch(`/api/categories/${cat.id}`, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(cat)
+                    });
+                    fetchData(); // Refresh pulse heights
+                };
+
+                const selectDate = (date) => selectedDate.value = date;
+                const formatTime = (s) => new Date(s).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+
+                onMounted(fetchData);
+
+                return { 
+                    tasks, categories, selectedDate, timelineDays, taskNodes, 
+                    pulsePath, siblingTasks, statusConfig, totalStress, isSyncing, 
+                    cycleStatus, updateCategory, selectDate, formatTime, fetchData,
+					sortedTasks
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

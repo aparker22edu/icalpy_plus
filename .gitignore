@@ -5,6 +5,8 @@ __pycache__/
 
 # Build
 *.egg-info/
+build/
+
 
 # Database
 *.db
@@ -12,6 +14,7 @@ __pycache__/
 
 # Environment/Secrets 
 .env
+config.ini
 
 # IDEs and Editors
 .vscode/

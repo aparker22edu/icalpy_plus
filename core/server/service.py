@@ -22,21 +22,6 @@ from typing import List, Dict, Set
 DB_NAME = "icalpy_plus.sqlite3"
 DATABASE_URL = f"sqlite:///{DB_NAME}"
 
-# engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False}, )
-
-
-# def get_session():
-#     with Session(engine) as session:
-#         session.exec(text("PRAGMA foreign_keys=ON"))
-#         status = session.exec(text("PRAGMA foreign_keys")).first()
-#         logging.debug(f"PRAGMA status: {status}") # Should be 1
-#         yield session
-
-# # implementing contextmanager fix from 
-# # https://stackoverflow.com/questions/75118223/working-with-generator-context-manager-in-fastapi-db-session
-# #  for the background session
-# session_context = contextmanager(get_session)
-
 class DataService:
     def __init__(self):
         self.url = DATABASE_URL

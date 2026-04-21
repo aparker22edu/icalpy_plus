@@ -17,10 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from server.service import data_service, sync_service
 from server.api import router
-
-# TODO: Allow for default/custom view folder location instead of relative path
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-VIEWS_PATH = BASE_DIR / "view"
+import config
 
 class ICalPyApp:
     def __init__(self):
@@ -44,25 +41,36 @@ class ICalPyApp:
         self.app.add_middleware(
             TrustedHostMiddleware, allowed_hosts=origins
         )
-
-        # Mount views
-        self._mount_views(VIEWS_PATH)
+        
         self.app.include_router(router)
 
-    # Mount each folder in 'view' 
-    def _mount_views(self, views_path):
-        """Helper to iterate and mount static directories."""
-        if not os.path.exists(views_path):
-            return
+        # Mount views
+        self._mount_views(config.view_path)
+        # mount default view to root
+        default_view = os.path.join(config.view_path, config.default_folder)
+        self.app.mount(
+            "/", 
+            StaticFiles(directory=default_view, html=True), 
+            'default'
+        )
 
-        for view_name in os.listdir(views_path):
-            view_dir = os.path.join(views_path, view_name)
+
+
+    # Mount each folder in 'view' 
+    def _mount_views(self, view_path):
+        """Helper to iterate and mount static directories."""
+        if not os.path.exists(view_path):
+            return
+        #loop through and mount each folder for FastAPI autoload index.html
+        for view_name in os.listdir(view_path):
+            view_dir = os.path.join(view_path, view_name)
             if os.path.isdir(view_dir):
                 self.app.mount(
                     f"/view/{view_name}", 
                     StaticFiles(directory=view_dir, html=True), 
                     name=view_name
                 )
+
     @asynccontextmanager
     async def lifespan_context(self, app: FastAPI):
         logging.debug(f'Lifespan startup in: {__name__}')

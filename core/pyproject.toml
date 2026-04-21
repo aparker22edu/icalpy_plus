@@ -8,8 +8,10 @@ dependencies = [
     "icalendar",
     "fastapi[standard-no-fastapi-cloud-cli]",
     "fastapi-uuidbase62",
-    "sqlmodel"
+    "sqlmodel",
+    "pystray",
+    "pillow"
 ]
 
 [project.scripts]
-icalpy-plus = "server.main:main"
+icalpy-plus = "main:main"
